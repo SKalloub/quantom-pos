@@ -1,17 +1,16 @@
 {
-  "homepage": "https://<اسم_حسابك_على_غيت_هاب>.github.io/<اسم_المستودع_Repository>",
+  "homepage": "https://SKalloub.github.io/quantom-pos",
   "name": "quantum-pos",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "scripts": {
+ "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "predeploy": "npm run build",
-"deploy": "gh-pages -d dist"
-    
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

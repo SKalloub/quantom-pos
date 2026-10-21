@@ -56,9 +56,9 @@ export default function InvoiceTemplate({ saleData }) {
             <tr key={index} className="hover:bg-gray-50">
               <td className="py-3 px-3 font-bold text-gray-600">{index + 1}</td>
               <td className="py-3 px-3 font-semibold text-gray-800">{item.name}</td>
-              <td className="py-3 px-3 text-center text-gray-600">${item.price.toFixed(2)}</td>
+              <td className="py-3 px-3 text-center text-gray-600">₪{item.price.toFixed(2)}</td>
               <td className="py-3 px-3 text-center text-gray-600">{item.qty}</td>
-              <td className="py-3 px-3 text-left font-bold text-[#E52328]">${(item.price * item.qty).toFixed(2)}</td>
+              <td className="py-3 px-3 text-left font-bold text-[#E52328]">₪{(item.price * item.qty).toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
@@ -75,17 +75,17 @@ export default function InvoiceTemplate({ saleData }) {
         <div className="space-y-2 text-sm">
           <div className="flex justify-between py-1 text-gray-600">
             <span>المجموع الفرعي:</span>
-            <span>${saleData.subTotal.toFixed(2)}</span>
+            <span>₪{saleData.subTotal.toFixed(2)}</span>
           </div>
           {saleData.discount > 0 && (
             <div className="flex justify-between py-1 text-red-600">
               <span>الخصم:</span>
-              <span>-${saleData.discount.toFixed(2)}</span>
+              <span>-₪{saleData.discount.toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between py-3 border-t-2 border-[#E52328] text-base font-extrabold text-gray-900 bg-red-50 px-3 rounded-lg">
             <span>المبلغ الإجمالي:</span>
-            <span className="text-[#E52328]">${saleData.totalAmount.toFixed(2)}</span>
+            <span className="text-[#E52328]">₪{saleData.totalAmount.toFixed(2)}</span>
           </div>
         </div>
       </div>

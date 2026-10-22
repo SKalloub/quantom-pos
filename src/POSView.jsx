@@ -1,19 +1,35 @@
-import React, { useState } from 'react';
-import { ShoppingCart, Trash2, Search, CheckCircle, X, Printer, Tag } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ShoppingCart, Trash2, Search, CheckCircle, X, Printer, Tag, Sparkles, Receipt, Check, Truck, CreditCard, ScanBarcode } from 'lucide-react';
 import { supabase } from './supabase';
 
-export default function POSView({ products, fetchProducts, onPrintInvoice }) {
+export default function POSView({ products, fetchProducts, onPrintInvoice, currentUser }) {
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
 
   // الخصم النهائي الإجمالي
   const [globalDiscountValue, setGlobalDiscountValue] = useState(0);
-  const [globalDiscountType, setGlobalDiscountType] = useState('fixed'); // 'fixed' or 'percent'
+  const [globalDiscountType, setGlobalDiscountType] = useState('fixed');
+
+  // خيارات الدفع والتوصيل
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [includeDelivery, setIncludeDelivery] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState(0);
 
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [checkoutMode, setCheckoutMode] = useState(null);
   const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', email: '' });
+
+  const [completedSale, setCompletedSale] = useState(null);
+
+  const searchInputRef = useRef(null);
+
+  // Focus تلقائي على خانة البحث أول ما تفتح الصفحة
+  useEffect(() => {
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, []);
 
   const addToCart = (product) => {
     if (product.stock <= 0) {
@@ -33,6 +49,25 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
       }
       return [...prevCart, { ...product, qty: 1, discountValue: 0, discountType: 'fixed' }];
     });
+  };
+
+  // 🎯 معالجة إدخال الباركود عبر مفتاح Enter تلقائياً
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const code = searchQuery.trim();
+      if (!code) return;
+
+      // البحث عن المنتج برقم الباركود المطابق تماماً
+      const matchedProduct = products.find(p => p.barcode === code);
+
+      if (matchedProduct) {
+        addToCart(matchedProduct);
+        setSearchQuery(''); // تفريغ الخانة للمسحة القادمة
+      } else {
+        // إذا لم يكن باركود دقيق، نكتفي بالتصفية العادية
+      }
+    }
   };
 
   const updateQty = (id, delta) => {
@@ -63,7 +98,6 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
     setCart(prev => prev.filter(item => item.id !== id));
   };
 
-  // حساب السعر النهائي لكل منتج بعد خصمه الخاص
   const calculateItemFinalPrice = (item) => {
     const baseTotal = item.price * item.qty;
     if (item.discountType === 'fixed') {
@@ -76,7 +110,6 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
 
   const subTotal = cart.reduce((sum, item) => sum + calculateItemFinalPrice(item), 0);
 
-  // حساب الخصم الإجمالي النهائي (مبلغ أو نسبة)
   const calculateGlobalDiscountAmount = () => {
     if (globalDiscountType === 'fixed') {
       return Math.max(0, globalDiscountValue);
@@ -86,7 +119,8 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
   };
 
   const totalDiscountAmount = calculateGlobalDiscountAmount();
-  const totalAmount = Math.max(0, subTotal - totalDiscountAmount);
+  const deliveryAmount = includeDelivery ? Math.max(0, parseFloat(deliveryFee) || 0) : 0;
+  const totalAmount = Math.max(0, subTotal - totalDiscountAmount + deliveryAmount);
 
   const executeCheckout = async (withPrint, customerData = {}) => {
     if (cart.length === 0) return;
@@ -94,10 +128,12 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
 
     const salePayload = {
       total_amount: totalAmount,
-      payment_method: 'cash',
+      payment_method: paymentMethod,
+      delivery_fee: deliveryAmount,
       customer_name: customerData.name || 'زبون نقدي',
       customer_phone: customerData.phone || 'غير متوفر',
-      customer_email: customerData.email || 'غير متوفر'
+      customer_email: customerData.email || 'غير متوفر',
+      cashier_name: currentUser?.name || 'غير محدد'
     };
 
     const { data: sale, error: saleErr } = await supabase
@@ -107,7 +143,8 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
       .single();
 
     if (saleErr) {
-      alert('خطأ في إتمام الدفع');
+      console.error('Supabase Sale Error:', saleErr);
+      alert('خطأ في إتمام الدفع: ' + (saleErr.message || 'تأكد من تحديث جدول قاعدة البيانات'));
       setLoading(false);
       return;
     }
@@ -122,10 +159,12 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
       }]);
 
       const productInDb = products.find(p => p.id === item.id);
-      await supabase
-        .from('products')
-        .update({ stock: productInDb.stock - item.qty })
-        .eq('id', item.id);
+      if (productInDb) {
+        await supabase
+          .from('products')
+          .update({ stock: productInDb.stock - item.qty })
+          .eq('id', item.id);
+      }
     }
 
     const currentSaleInfo = {
@@ -139,19 +178,25 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
       })),
       subTotal,
       discount: totalDiscountAmount,
+      deliveryFee: deliveryAmount,
+      paymentMethod,
       totalAmount,
-      customer: salePayload
+      customer: salePayload,
+      itemCount: cart.reduce((a, b) => a + b.qty, 0)
     };
-
-    alert('تمت عملية البيع بنجاح ⚡');
 
     if (withPrint) {
       onPrintInvoice(currentSaleInfo);
     }
 
+    setCompletedSale(currentSaleInfo);
+
     setCart([]);
     setGlobalDiscountValue(0);
     setGlobalDiscountType('fixed');
+    setPaymentMethod('cash');
+    setIncludeDelivery(false);
+    setDeliveryFee(0);
     setShowCheckoutModal(false);
     setCheckoutMode(null);
     setCustomerInfo({ name: '', phone: '', email: '' });
@@ -166,7 +211,66 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
 
   return (
     <>
-      {/* مودال خيارات الدفع والطباعة */}
+      {completedSale && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-[100] flex justify-center items-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-7 text-center relative overflow-hidden border border-emerald-100 animate-fadeIn">
+            
+            <div className="absolute -top-12 -right-12 w-32 h-32 bg-emerald-100/50 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-quantum-red/10 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="relative mx-auto w-20 h-20 mb-4 flex items-center justify-center">
+              <div className="absolute inset-0 bg-emerald-500/20 rounded-full animate-ping" />
+              <div className="bg-gradient-to-tr from-emerald-600 to-teal-400 text-white rounded-full w-20 h-20 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                <Check size={42} className="stroke-[3]" />
+              </div>
+            </div>
+
+            <h3 className="text-2xl font-black text-quantum-dark mb-1 flex items-center justify-center gap-1.5">
+              تمت عملية البيع بنجاح! <Sparkles className="text-amber-400 fill-amber-400" size={20} />
+            </h3>
+            <p className="text-xs text-gray-500 mb-6 font-medium">تم تسجيل الفاتورة وتحديث المخزون في النظام</p>
+
+            <div className="bg-quantum-bg p-4 rounded-2xl border border-gray-100 space-y-2.5 text-xs text-right mb-6">
+              <div className="flex justify-between items-center border-b pb-2">
+                <span className="text-gray-500">رقم الفاتورة:</span>
+                <span className="font-mono font-bold text-quantum-dark">#{completedSale.id.slice(0, 8).toUpperCase()}</span>
+              </div>
+              <div className="flex justify-between items-center border-b pb-2">
+                <span className="text-gray-500">الكاشير المسؤول:</span>
+                <span className="font-bold text-quantum-dark">{completedSale.customer.cashier_name}</span>
+              </div>
+              <div className="flex justify-between items-center border-b pb-2">
+                <span className="text-gray-500">طريقة الدفع:</span>
+                <span className="font-bold text-quantum-dark">
+                  {completedSale.paymentMethod === 'cash' ? '💵 كاش' : completedSale.paymentMethod === 'visa' ? '💳 فيزا' : '🔄 أخرى / تسهيلات'}
+                </span>
+              </div>
+              {completedSale.deliveryFee > 0 && (
+                <div className="flex justify-between items-center border-b pb-2">
+                  <span className="text-gray-500">قيمة التوصيل:</span>
+                  <span className="font-bold text-quantum-dark">₪{completedSale.deliveryFee.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-1">
+                <span className="font-bold text-gray-700">المبلغ المدفوع:</span>
+                <span className="text-lg font-black text-emerald-600">₪{completedSale.totalAmount.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => {
+                setCompletedSale(null);
+                setTimeout(() => searchInputRef.current?.focus(), 100);
+              }}
+              className="w-full bg-quantum-dark text-white py-3.5 rounded-2xl font-bold hover:bg-quantum-red transition shadow-lg text-sm flex items-center justify-center gap-2"
+            >
+              <CheckCircle size={18} />
+              متابعة عملية بيع جديدة
+            </button>
+          </div>
+        </div>
+      )}
+
       {showCheckoutModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 print:hidden">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-fadeIn">
@@ -244,15 +348,22 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
       {/* واجهة الكاشير */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-130px)]">
         <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm p-5 flex flex-col border border-gray-100">
+          
+          {/* خانة البحث والمسح العالي السرعة */}
           <div className="relative mb-4">
             <Search className="absolute right-3.5 top-3.5 text-gray-400" size={20} />
             <input 
+              ref={searchInputRef}
               type="text" 
-              placeholder="ابحث باسم المنتج أو امسح الباركود هنا..." 
+              placeholder="امسح الباركود مباشرة بالماسح أو ابحث باسم المنتج..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pr-11 pl-4 py-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red transition text-sm"
+              onKeyDown={handleKeyDown}
+              className="w-full pr-11 pl-28 py-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red transition text-sm font-semibold"
             />
+            <span className="absolute left-3 top-2.5 bg-quantum-red/10 text-quantum-red px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1">
+              <ScanBarcode size={14} /> جاهز للمسح
+            </span>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto flex-1 pr-1">
@@ -285,9 +396,9 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
               سلة المشتريات الحالية
             </h2>
 
-            <div className="overflow-y-auto max-h-[300px] space-y-3 pr-1">
+            <div className="overflow-y-auto max-h-[220px] space-y-3 pr-1">
               {cart.length === 0 ? (
-                <p className="text-center text-gray-400 py-12 text-sm">السلة فارغة، اختر المنتجات للبدء</p>
+                <p className="text-center text-gray-400 py-10 text-sm">السلة فارغة، اختر المنتجات أو امسح الباركود للبدء</p>
               ) : (
                 cart.map(item => (
                   <div key={item.id} className="bg-quantum-bg p-3 rounded-xl border border-gray-100 space-y-2">
@@ -304,7 +415,6 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
                       </div>
                     </div>
 
-                    {/* قسم خصم المنتج الواحد */}
                     <div className="flex items-center gap-2 pt-2 border-t border-gray-200/60 text-[11px]">
                       <span className="flex items-center gap-1 text-gray-500 font-medium">
                         <Tag size={12} className="text-quantum-red" /> خصم:
@@ -334,13 +444,12 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
             </div>
           </div>
 
-          <div className="border-t pt-4 mt-2 space-y-2.5">
+          <div className="border-t pt-3 mt-1 space-y-2">
             <div className="flex justify-between text-xs text-gray-600">
               <span>المجموع الفرعي:</span>
               <span>₪{subTotal.toFixed(2)}</span>
             </div>
 
-            {/* خصم إجمالي إضافي (مبلغ أو نسبة مئوية) */}
             <div className="flex justify-between items-center text-xs text-gray-600">
               <span>خصم إجمالي إضافي:</span>
               <div className="flex items-center gap-1.5">
@@ -369,7 +478,48 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
               </div>
             )}
 
-            <div className="flex justify-between text-lg font-bold border-t pt-2">
+            <div className="flex justify-between items-center text-xs text-gray-600">
+              <span className="flex items-center gap-1">
+                <CreditCard size={13} className="text-quantum-red" /> طريقة الدفع:
+              </span>
+              <select 
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                className="p-1 bg-quantum-bg border rounded-lg text-xs font-bold text-quantum-dark focus:outline-none focus:border-quantum-red"
+              >
+                <option value="cash">💵 كاش (نقدًا)</option>
+                <option value="visa">💳 فيزا (بطاقة)</option>
+                <option value="other">🔄 أخرى / تسهيلات</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5 pt-1 border-t border-gray-100">
+              <div className="flex justify-between items-center text-xs">
+                <label className="flex items-center gap-1.5 font-bold text-gray-700 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={includeDelivery}
+                    onChange={(e) => setIncludeDelivery(e.target.checked)}
+                    className="rounded border-gray-300 text-quantum-red focus:ring-quantum-red"
+                  />
+                  <Truck size={14} className="text-quantum-red" /> إضافة توصيل
+                </label>
+                {includeDelivery && (
+                  <div className="flex items-center gap-1">
+                    <input 
+                      type="number" 
+                      placeholder="قيمة التوصيل"
+                      value={deliveryFee || ''}
+                      onChange={(e) => setDeliveryFee(parseFloat(e.target.value) || 0)}
+                      className="w-20 p-1 bg-quantum-bg border rounded-lg text-center text-xs font-bold text-quantum-red focus:outline-none focus:border-quantum-red"
+                    />
+                    <span className="text-[11px] text-gray-500">₪</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-between text-base font-bold border-t pt-2">
               <span>الإجمالي النهائي:</span>
               <span className="text-quantum-red">₪{totalAmount.toFixed(2)}</span>
             </div>
@@ -377,9 +527,9 @@ export default function POSView({ products, fetchProducts, onPrintInvoice }) {
             <button 
               disabled={cart.length === 0 || loading}
               onClick={() => setShowCheckoutModal(true)}
-              className="w-full bg-quantum-red text-white py-3 rounded-xl font-bold hover:bg-opacity-90 transition disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm text-sm"
+              className="w-full bg-quantum-red text-white py-2.5 rounded-xl font-bold hover:bg-opacity-90 transition disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm text-sm"
             >
-              <CheckCircle size={18} />
+              <CheckCircle size={16} />
               إتمام الدفع والطباعة
             </button>
           </div>

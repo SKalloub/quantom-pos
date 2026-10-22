@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Receipt, Search, Printer, X, Eye, User, Phone, Mail, Calendar, DollarSign, Trash2 } from 'lucide-react';
+import { Receipt, Search, Printer, X, Eye, User, Phone, Mail, Calendar, DollarSign, Trash2, Filter, ChevronDown, ChevronUp, UserCheck } from 'lucide-react';
 
 export default function SalesHistory({ onPrintInvoice }) {
   const [sales, setSales] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSale, setSelectedSale] = useState(null);
   
+  // الفلاتر
+  const [selectedCashier, setSelectedCashier] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', 'yesterday', 'week', 'month'
+
+  // الأيام المفتوحة في الأكورديون
+  const [openDays, setOpenDays] = useState({});
+
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [targetSaleToPrint, setTargetSaleToPrint] = useState(null);
   const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', email: '' });
@@ -29,15 +36,27 @@ export default function SalesHistory({ onPrintInvoice }) {
       `)
       .order('created_at', { ascending: false });
 
-    if (error) console.error('Error fetching sales:', error);
-    else setSales(data || []);
+    if (error) {
+      console.error('Error fetching sales:', error);
+    } else {
+      setSales(data || []);
+      // فتح اليوم الأول تلقائياً في الأكورديون
+      if (data && data.length > 0) {
+        const firstDayKey = new Date(data[0].created_at).toLocaleDateString('ar-EG', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+        setOpenDays({ [firstDayKey]: true });
+      }
+    }
   }
 
   // حذف فاتورة من السجل
   const handleDeleteSale = async (saleId) => {
     if (!window.confirm('هل أنت متأكد من حذف هذه الفاتورة نهائياً؟')) return;
 
-    // حذف عناصر الفاتورة المرتبطة أولاً (Cascade) ثم الفاتورة نفسها
     await supabase.from('sale_items').delete().eq('sale_id', saleId);
     const { error } = await supabase.from('sales').delete().eq('id', saleId);
 
@@ -105,16 +124,63 @@ export default function SalesHistory({ onPrintInvoice }) {
     onPrintInvoice(formattedData);
   };
 
-  const filteredSales = sales.filter(s => 
-    s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (s.customer_name && s.customer_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (s.customer_phone && s.customer_phone.includes(searchQuery))
-  );
+  // جلب قائمة الكاشيرية المتوفرين في السجل
+  const uniqueCashiers = Array.from(new Set(sales.map(s => s.cashier_name || 'غير محدد')));
+
+  // تطبيق الفلاتر (البحث، الكاشير، والتاريخ)
+  const filteredSales = sales.filter(sale => {
+    const matchesSearch = 
+      sale.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (sale.customer_name && sale.customer_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (sale.customer_phone && sale.customer_phone.includes(searchQuery));
+
+    const matchesCashier = selectedCashier === 'all' || (sale.cashier_name || 'غير محدد') === selectedCashier;
+
+    // فلترة التاريخ
+    const saleDate = new Date(sale.created_at);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    let matchesDate = true;
+    if (dateFilter === 'today') {
+      matchesDate = saleDate.toDateString() === today.toDateString();
+    } else if (dateFilter === 'yesterday') {
+      matchesDate = saleDate.toDateString() === yesterday.toDateString();
+    } else if (dateFilter === 'week') {
+      const sevenDaysAgo = new Date(today);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      matchesDate = saleDate >= sevenDaysAgo;
+    } else if (dateFilter === 'month') {
+      matchesDate = saleDate.getMonth() === today.getMonth() && saleDate.getFullYear() === today.getFullYear();
+    }
+
+    return matchesSearch && matchesCashier && matchesDate;
+  });
+
+  // تجميع الفواتير المفلترة حسب اليوم لإنشاء الأكورديون المنسدل
+  const groupedSales = filteredSales.reduce((groups, sale) => {
+    const dayKey = new Date(sale.created_at).toLocaleDateString('ar-EG', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    if (!groups[dayKey]) {
+      groups[dayKey] = [];
+    }
+    groups[dayKey].push(sale);
+    return groups;
+  }, {});
+
+  const toggleDayAccordion = (dayKey) => {
+    setOpenDays(prev => ({ ...prev, [dayKey]: !prev[dayKey] }));
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       
-      {/* مودال عرض تفاصيل الفاتورة */}
+      {/* 1. مودال عرض تفاصيل الفاتورة */}
       {selectedSale && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 animate-fadeIn">
@@ -134,7 +200,7 @@ export default function SalesHistory({ onPrintInvoice }) {
               <div className="space-y-1.5">
                 <p className="flex items-center gap-1.5 font-bold text-quantum-dark">
                   <User size={14} className="text-quantum-red" />
-                  {selectedSale.customer_name || 'زبون نقدي'}
+                  الزبون: {selectedSale.customer_name || 'زبون نقدي'}
                 </p>
                 <p className="flex items-center gap-1.5 text-gray-500">
                   <Phone size={14} />
@@ -147,6 +213,10 @@ export default function SalesHistory({ onPrintInvoice }) {
               </div>
 
               <div className="space-y-1.5 border-r border-gray-200 pr-3">
+                <p className="flex items-center gap-1.5 font-bold text-quantum-dark">
+                  <UserCheck size={14} className="text-quantum-red" />
+                  الكاشير: {selectedSale.cashier_name || 'غير محدد'}
+                </p>
                 <p className="flex items-center gap-1.5 text-gray-600">
                   <Calendar size={14} className="text-quantum-red" />
                   {new Date(selectedSale.created_at).toLocaleString('ar-EG')}
@@ -208,7 +278,7 @@ export default function SalesHistory({ onPrintInvoice }) {
         </div>
       )}
 
-      {/* مودال إدخال بيانات الزبون للطباعة */}
+      {/* 2. مودال إدخال بيانات الزبون للطباعة */}
       {showCustomerModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
@@ -259,13 +329,18 @@ export default function SalesHistory({ onPrintInvoice }) {
         </div>
       )}
 
-      {/* جدول المبيعات */}
-      <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6 border-b pb-4">
-          <h2 className="text-xl font-bold flex items-center gap-2 text-quantum-dark">
-            <Receipt className="text-quantum-red" />
-            سجل حركة المبيعات بالفواتير
-          </h2>
+      {/* 3. شريط التحكم والفلاتر وقائمة المبيعات */}
+      <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100 space-y-6">
+        
+        {/* Header & Search */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-4">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2 text-quantum-dark">
+              <Receipt className="text-quantum-red" />
+              سجل حركة المبيعات بالفواتير
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">استعراض وتصفية المبيعات حسب الأيام والكاشيرية</p>
+          </div>
 
           <div className="relative w-full md:w-80">
             <Search className="absolute right-3.5 top-3 text-gray-400" size={18} />
@@ -279,40 +354,150 @@ export default function SalesHistory({ onPrintInvoice }) {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-right border-collapse">
-            <thead>
-              <tr className="bg-quantum-bg text-gray-700 text-xs font-bold border-b">
-                <th className="py-3 px-4">رقم الفاتورة</th>
-                <th className="py-3 px-4">اسم العميل</th>
-                <th className="py-3 px-4">التاريخ والوقت</th>
-                <th className="py-3 px-4 text-center">الإجمالي (₪)</th>
-                <th className="py-3 px-4 text-center">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm divide-y divide-gray-100">
-              {filteredSales.map(sale => (
-                <tr key={sale.id} className="hover:bg-gray-50/50">
-                  <td className="py-3.5 px-4 font-mono text-xs font-bold text-quantum-dark">#{sale.id.slice(0, 8).toUpperCase()}</td>
-                  <td className="py-3.5 px-4 font-semibold text-gray-800">{sale.customer_name || 'زبون نقدي'}</td>
-                  <td className="py-3.5 px-4 text-xs text-gray-500">{new Date(sale.created_at).toLocaleString('ar-EG')}</td>
-                  <td className="py-3.5 px-4 text-center font-black text-quantum-red">₪{sale.total_amount.toFixed(2)}</td>
-                  <td className="py-3.5 px-4 text-center flex justify-center gap-2">
-                    <button onClick={() => setSelectedSale(sale)} className="bg-gray-100 text-gray-700 p-2 rounded-lg hover:bg-gray-200 transition" title="عرض التفاصيل">
-                      <Eye size={16} />
-                    </button>
-                    <button onClick={() => handlePrintClick(sale)} className="bg-quantum-red text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-opacity-90 transition flex items-center gap-1.5 shadow-sm">
-                      <Printer size={14} /> طباعة
-                    </button>
-                    <button onClick={() => handleDeleteSale(sale.id)} className="bg-red-50 text-red-600 p-2 rounded-lg hover:bg-red-100 transition" title="حذف الفاتورة">
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
+        {/* 🛠️ شريط الفلاتر الذكية (تاريخ + كاشير) */}
+        <div className="flex flex-wrap items-center gap-3 bg-quantum-bg p-3.5 rounded-xl border border-gray-100 text-xs">
+          <span className="font-bold text-quantum-dark flex items-center gap-1">
+            <Filter size={14} className="text-quantum-red" /> الفلاتر:
+          </span>
+
+          {/* فلتر الكاشير */}
+          <div className="flex items-center gap-1.5">
+            <label className="text-gray-500 font-medium">الكاشير:</label>
+            <select 
+              value={selectedCashier}
+              onChange={e => setSelectedCashier(e.target.value)}
+              className="p-2 bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-quantum-red font-semibold text-xs"
+            >
+              <option value="all">كل الكاشيرية 👥</option>
+              {uniqueCashiers.map((cashier, idx) => (
+                <option key={idx} value={cashier}>{cashier}</option>
               ))}
-            </tbody>
-          </table>
+            </select>
+          </div>
+
+          {/* فلتر الفترة الزمنية */}
+          <div className="flex items-center gap-1.5">
+            <label className="text-gray-500 font-medium">التاريخ:</label>
+            <select 
+              value={dateFilter}
+              onChange={e => setDateFilter(e.target.value)}
+              className="p-2 bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-quantum-red font-semibold text-xs"
+            >
+              <option value="all">كل التواريخ 📅</option>
+              <option value="today">اليوم</option>
+              <option value="yesterday">الأمس</option>
+              <option value="week">آخر 7 أيام</option>
+              <option value="month">هذا الشهر</option>
+            </select>
+          </div>
+
+          {/* عدد الفواتير الإجمالي المفلتر */}
+          <span className="mr-auto font-bold text-quantum-dark bg-white px-3 py-1.5 rounded-lg border">
+            المجموع: <span className="text-quantum-red font-black">{filteredSales.length}</span> فاتورة
+          </span>
         </div>
+
+        {/* 4. عرض الفواتير مجمعة ومقسمة حسب الأيام في أكورديون منسدل */}
+        <div className="space-y-4">
+          {Object.keys(groupedSales).length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              لا توجد فواتير مبيعات تطابق الفلاتر المحددة
+            </div>
+          ) : (
+            Object.entries(groupedSales).map(([dayTitle, daySales]) => {
+              const dayTotalRevenue = daySales.reduce((sum, s) => sum + s.total_amount, 0);
+              const isOpen = openDays[dayTitle] ?? false;
+
+              return (
+                <div key={dayTitle} className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                  
+                  {/* رأس القائمة المنسدلة (الأكورديون) لكل يوم */}
+                  <div 
+                    onClick={() => toggleDayAccordion(dayTitle)}
+                    className="bg-quantum-dark text-white p-4 flex justify-between items-center cursor-pointer hover:bg-quantum-darker transition select-none"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="bg-quantum-red p-2 rounded-xl text-white">
+                        <Calendar size={18} />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm text-white">{dayTitle}</h3>
+                        <span className="text-[11px] text-gray-400">
+                          {daySales.length} فواتير مسجلة في هذا اليوم
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="text-left">
+                        <span className="text-[10px] text-gray-400 block">إجمالي مبيعات اليوم</span>
+                        <span className="text-base font-black text-quantum-red">₪{dayTotalRevenue.toFixed(2)}</span>
+                      </div>
+                      <div className="bg-white/10 p-1.5 rounded-lg text-gray-300">
+                        {isOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* جدول فواتير اليوم المغلق/المفتوح */}
+                  {isOpen && (
+                    <div className="overflow-x-auto bg-white p-2">
+                      <table className="w-full text-right border-collapse">
+                        <thead>
+                          <tr className="bg-quantum-bg text-gray-700 text-xs font-bold border-b">
+                            <th className="py-3 px-4">رقم الفاتورة</th>
+                            <th className="py-3 px-4">الزبون</th>
+                            <th className="py-3 px-4">الكاشير المسئول</th>
+                            <th className="py-3 px-4">وقت البيع</th>
+                            <th className="py-3 px-4 text-center">الإجمالي (₪)</th>
+                            <th className="py-3 px-4 text-center">إجراءات</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-sm divide-y divide-gray-100">
+                          {daySales.map(sale => (
+                            <tr key={sale.id} className="hover:bg-gray-50/70 transition">
+                              <td className="py-3 px-4 font-mono text-xs font-bold text-quantum-dark">
+                                #{sale.id.slice(0, 8).toUpperCase()}
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-gray-800">
+                                {sale.customer_name || 'زبون نقدي'}
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-quantum-red text-xs">
+                                <span className="bg-red-50 text-quantum-red px-2.5 py-1 rounded-md font-bold inline-flex items-center gap-1">
+                                  <UserCheck size={12} />
+                                  {sale.cashier_name || 'غير محدد'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-xs text-gray-500">
+                                {new Date(sale.created_at).toLocaleTimeString('ar-EG')}
+                              </td>
+                              <td className="py-3 px-4 text-center font-black text-quantum-red">
+                                ₪{sale.total_amount.toFixed(2)}
+                              </td>
+                              <td className="py-3 px-4 text-center flex justify-center gap-2">
+                                <button onClick={() => setSelectedSale(sale)} className="bg-gray-100 text-gray-700 p-2 rounded-lg hover:bg-gray-200 transition" title="عرض التفاصيل">
+                                  <Eye size={16} />
+                                </button>
+                                <button onClick={() => handlePrintClick(sale)} className="bg-quantum-red text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-opacity-90 transition flex items-center gap-1.5 shadow-sm">
+                                  <Printer size={14} /> طباعة
+                                </button>
+                                <button onClick={() => handleDeleteSale(sale.id)} className="bg-red-50 text-red-600 p-2 rounded-lg hover:bg-red-100 transition" title="حذف الفاتورة">
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                </div>
+              );
+            })
+          )}
+        </div>
+
       </div>
     </div>
   );

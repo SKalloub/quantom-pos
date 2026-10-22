@@ -1,11 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
-import { Package, Plus, Save, Edit3, Trash2 } from 'lucide-react';
+import { Package, Plus, Save, Edit3, Trash2, ScanBarcode } from 'lucide-react';
 
 export default function ProductManagement({ products, fetchProducts }) {
   const [newProduct, setNewProduct] = useState({ barcode: '', name: '', price: '', stock: '' });
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ price: '', stock: '' });
+
+  const barcodeInputRef = useRef(null);
+
+  // التركيز التلقائي على خانة الباركود للسرعة الخارقة في الإدخال
+  useEffect(() => {
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
+  }, []);
 
   const handleAddProduct = async (e) => {
     e.preventDefault();
@@ -22,6 +31,8 @@ export default function ProductManagement({ products, fetchProducts }) {
       alert('تمت إضافة المنتج بنجاح للقاعدة ⚡');
       setNewProduct({ barcode: '', name: '', price: '', stock: '' });
       fetchProducts();
+      // إعادة التركيز التلقائي على خانة الباركود ليمسح المنتج التالي مباشرة
+      setTimeout(() => barcodeInputRef.current?.focus(), 100);
     } else {
       alert('خطأ أثناء الإضافة، تأكد أن الباركود فريد وغير مكرر');
     }
@@ -50,7 +61,6 @@ export default function ProductManagement({ products, fetchProducts }) {
     }
   };
 
-  // حذف منتج من المستودع
   const handleDeleteProduct = async (id) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا المنتج نهائياً من المستودع؟')) return;
 
@@ -68,21 +78,28 @@ export default function ProductManagement({ products, fetchProducts }) {
     <div className="space-y-8">
       {/* إضافة منتج جديد */}
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-        <h2 className="text-xl font-bold mb-6 flex items-center gap-2 border-b pb-3 text-quantum-dark">
-          <Plus className="text-quantum-red" />
-          إضافة منتج جديد للمستودع
-        </h2>
+        <div className="flex justify-between items-center mb-6 border-b pb-3">
+          <h2 className="text-xl font-bold flex items-center gap-2 text-quantum-dark">
+            <Plus className="text-quantum-red" />
+            إضافة منتج جديد للمستودع
+          </h2>
+          <span className="text-xs bg-quantum-bg text-quantum-red font-bold px-3 py-1 rounded-xl flex items-center gap-1 border">
+            <ScanBarcode size={15} /> جاهز لمسح الباركود
+          </span>
+        </div>
+
         <form onSubmit={handleAddProduct} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1.5">باركود المنتج</label>
               <input 
+                ref={barcodeInputRef}
                 type="text" 
                 required
-                placeholder="امسح أو اكتب الباركود..."
+                placeholder="امسح الباركود بالماسح الضوئي..."
                 value={newProduct.barcode}
                 onChange={e => setNewProduct({...newProduct, barcode: e.target.value})}
-                className="w-full p-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red text-sm"
+                className="w-full p-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red text-sm font-mono font-bold"
               />
             </div>
             <div>
@@ -90,7 +107,7 @@ export default function ProductManagement({ products, fetchProducts }) {
               <input 
                 type="text" 
                 required
-                placeholder="مثال: مشروب طاقة / إكسسوار..."
+                placeholder="مثال: Logitech G77 Mouse / Razer Dock..."
                 value={newProduct.name}
                 onChange={e => setNewProduct({...newProduct, name: e.target.value})}
                 className="w-full p-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red text-sm"
@@ -104,6 +121,7 @@ export default function ProductManagement({ products, fetchProducts }) {
                 type="number" 
                 step="0.01" 
                 required
+                placeholder="0.00"
                 value={newProduct.price}
                 onChange={e => setNewProduct({...newProduct, price: e.target.value})}
                 className="w-full p-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red text-sm"
@@ -114,6 +132,7 @@ export default function ProductManagement({ products, fetchProducts }) {
               <input 
                 type="number" 
                 required
+                placeholder="0"
                 value={newProduct.stock}
                 onChange={e => setNewProduct({...newProduct, stock: e.target.value})}
                 className="w-full p-3 bg-quantum-bg rounded-xl border border-gray-200 focus:outline-none focus:border-quantum-red text-sm"
